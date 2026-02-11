@@ -27,34 +27,46 @@ async fn main() -> Result<(), anyhow::Error> {
     // //action:prompt_end
     // echo:SD card ok
 
+    let mut pos = 0;
     let mut raw = [0u8; 512];
-    let mut rest = String::new();
     let mut sig = signal(SignalKind::interrupt())?;
     loop {
         print!("  Reading... ");
-        fn handle(line: &str) {
-            println!("> {line:?}");
+        fn handle(line: &[u8]) {
+            if let Ok(line) = str::from_utf8(line) {
+                println!("> {line:?}");
+                return;
+            }
+            println!("> GARBAGE");
         }
         select! {
             _ = sig.recv() => break,
-            r = port.read(&mut raw) => {
+            r = port.read(&mut raw[pos..]) => {
                 match r {
+                    Ok(0) if pos == 0 => break,
                     Ok(0) => {
-                        handle(&rest);
+                        handle(&raw[..pos]);
                         break;
                     }
                     Ok(n) => {
                         println!("{n} bytes.");
-                        let chunk = String::from_utf8_lossy(&raw[..n]);
-                        rest.push_str(&chunk);
+                        pos += n;
 
-                        while let Some(i) = rest.find('\n') {
-                            let line: String = rest.drain(..=i).collect();
-                            handle(line.trim_end_matches('\n'));
+                        let mut start = 0;
+                        while let Some(i) = raw[start..pos].iter().position(|&c| c == b'\n') {
+                            handle(&raw[start..(start + i)]);
+                            start += i + 1;
                         }
+                        assert!(start <= pos);
+                        if start > 0 {
+                            // Move the rest back up
+                            raw.copy_within(start..pos, 0);
+                            pos -= start;
+                        }
+                        assert_ne!(pos, raw.len(), "Line too long? ({pos}) {raw:?}");
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::TimedOut => {
-                        print!(".");
+                        print!("{}", if pos == 0 { "." } else { "!" });
                         continue;
                     }
                     Err(e) => return Err(e)?,
