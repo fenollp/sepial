@@ -1,7 +1,10 @@
-use serial2_tokio::SerialPort;
 use std::io;
-use tokio::select;
-use tokio::signal::unix::{SignalKind, signal};
+
+use serial2_tokio::SerialPort;
+use tokio::{
+    select,
+    signal::unix::{SignalKind, signal},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -59,8 +62,7 @@ async fn main() -> Result<(), anyhow::Error> {
                         }
                         assert!(start <= pos);
                         if start > 0 {
-                            // Move the rest back up
-                            raw.copy_within(start..pos, 0);
+                            raw.copy_within(start..pos, 0); // Move the rest back up
                             pos -= start;
                         }
                         assert_ne!(pos, raw.len(), "Line too long? ({pos}) {raw:?}");
