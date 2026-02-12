@@ -42,44 +42,6 @@ rustflags = [
     "-C", "force-frame-pointers=true",
 ]
 
-[target.bpfel-unknown-none]
-rustflags = [
-    "-A", "clippy::assigning_clones",
-    "-A", "clippy::result_large_err",
-    "-W", "clippy::await_holding_invalid_type",
-    "-W", "clippy::cast_lossless",
-    "-W", "clippy::redundant_closure_for_method_calls",
-    "-W", "clippy::str_to_string",
-
-    # https://doc.rust-lang.org/nightly/rustc/codegen-options/index.html#overflow-checks
-    "-C", "overflow-checks=true",
-
-    # https://github.com/aya-rs/bpf-linker?tab=readme-ov-file#experimental-btf-support
-    "-C", "debuginfo=2",
-    "-C", "link-arg=--btf",
-
-    # https://pchaigno.github.io/bpf/2021/10/20/ebpf-instruction-sets.html
-    "-C", "target-cpu=v3",
-]
-
-[target.x86_64-apple-darwin]
-rustflags = [
-    "-A", "clippy::assigning_clones",
-    "-A", "clippy::result_large_err",
-    "-W", "clippy::await_holding_invalid_type",
-    "-W", "clippy::cast_lossless",
-    "-W", "clippy::redundant_closure_for_method_calls",
-    "-W", "clippy::str_to_string",
-
-    # https://doc.rust-lang.org/nightly/rustc/codegen-options/index.html#overflow-checks
-    "-C", "overflow-checks=true",
-
-    # Enable frame pointers for proper stack traces using "dumb" instrumentation
-    # (i.e. anything not gdb)
-    # https://doc.rust-lang.org/rustc/codegen-options/index.html#force-frame-pointers
-    "-C", "force-frame-pointers=true",
-]
-
 [target.x86_64-unknown-linux-musl]
 linker = "x86_64-linux-musl-gcc"
 rustflags = [
