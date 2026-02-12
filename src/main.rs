@@ -35,13 +35,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut sig = signal(SignalKind::interrupt())?;
     loop {
         print!("  Reading... ");
-        fn handle(line: &[u8]) {
-            if let Ok(line) = str::from_utf8(line) {
-                println!("> {line:?}");
-                return;
-            }
-            println!("> GARBAGE");
-        }
         select! {
             _ = sig.recv() => break,
             r = port.read(&mut raw[pos..]) => {
@@ -71,7 +64,7 @@ async fn main() -> Result<(), anyhow::Error> {
                         print!("{}", if pos == 0 { "." } else { "!" });
                         continue;
                     }
-                    Err(e) => return Err(e)?,
+                    Err(e) => return Err(e.into()),
                 }
             }
         }
@@ -79,4 +72,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
     println!("Exited.");
     Ok(())
+}
+
+fn handle(line: &[u8]) {
+    if let Ok(line) = str::from_utf8(line) {
+        println!("> {line:?}");
+        return;
+    }
+    println!("> GARBAGE");
 }
