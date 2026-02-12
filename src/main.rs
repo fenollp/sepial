@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt, fmt::Display, io};
+use std::{collections::VecDeque, env, fmt, fmt::Display, io};
 
 use anyhow::bail;
 use serial2_tokio::SerialPort;
@@ -6,6 +6,9 @@ use tokio::{
     select,
     signal::unix::{SignalKind, signal},
 };
+
+const SEPIAL_PORT: &str = "SEPIAL_PORT";
+const SEPIAL_BAUD: &str = "SEPIAL_BAUD";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -15,8 +18,8 @@ async fn main() -> Result<(), anyhow::Error> {
     //
     // python3 -m serial.tools.miniterm -e /dev/ttyACM0 250000
     //
-    let port_name = "/dev/ttyACM0";
-    let baud_rate = 250000;
+    let port_name = env::var(SEPIAL_PORT).unwrap_or("/dev/ttyACM0".to_owned());
+    let baud_rate = env::var(SEPIAL_BAUD).map(|x| x.parse().unwrap()).unwrap_or(250000);
 
     print!("Connecting to {port_name} at {baud_rate}... ");
     let port = SerialPort::open(port_name, baud_rate)?;
