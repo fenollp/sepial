@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, fmt, fmt::Display, io};
 
+use anyhow::bail;
 use serial2_tokio::SerialPort;
 use tokio::{
     select,
@@ -139,6 +140,13 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> anyhow::Re
         "ok" => {
             println!("   #{} ack'd", state.last_line_number_sent);
             state.ready = Some(true);
+        }
+        _ if line.starts_with("Error:") => {
+            if line.contains("Printer halted") {
+                bail!("Fatal: {line}")
+            }
+            println!("Stopping! Should we be continuing?");
+            state.ready = Some(false);
         }
         _ => {}
     }
