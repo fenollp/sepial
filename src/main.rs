@@ -129,7 +129,6 @@ struct State {
     ready: Option<bool>,
     reqs: VecDeque<Req>,
     last_line_number_sent: u32,
-    started_drawing: bool,
 }
 impl State {
     async fn send(&mut self, port: &SerialPort) -> Result<Option<Req>> {
@@ -186,7 +185,7 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
         _ => {}
     }
 
-    if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() && !state.started_drawing {
+    if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() {
         print!("  Loading... ");
         let mut count = 0;
         let mut lines = io::stdin().lines();
@@ -202,7 +201,6 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
             state.reqs.push_back(Req::Raw(line));
         }
         println!("{count} GCODE lines!");
-        state.started_drawing = true;
         state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die].into_iter());
         if count != 0 {
             println!("  Drawing!");
