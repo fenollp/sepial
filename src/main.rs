@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, env, fmt, fmt::Display, io};
 
-use anyhow::bail;
+use anyhow::{Result, bail};
 use serial2_tokio::SerialPort;
 use tokio::{
     select,
@@ -11,7 +11,7 @@ const SEPIAL_PORT: &str = "SEPIAL_PORT";
 const SEPIAL_BAUD: &str = "SEPIAL_BAUD";
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> Result<()> {
     println!("Available ports: {:?}", SerialPort::available_ports()?);
 
     // On Windows, use something like "COM1" or "COM15".
@@ -34,8 +34,11 @@ async fn main() -> Result<(), anyhow::Error> {
     // //action:prompt_end
     // echo:SD card ok
 
-    let mut state =
-        State { reqs: [Req::Heartbeat, Req::IHandleDialogs].into(), ..State::default() };
+    let mut state = State {
+        reqs: [Req::Heartbeat, Req::PromptsSupported, PEN_UP, Req::MotorsEngage, Req::FindHome]
+            .into(),
+        ..State::default()
+    };
 
     let mut pos = 0;
     let mut raw = [0u8; 512];
@@ -43,12 +46,17 @@ async fn main() -> Result<(), anyhow::Error> {
     loop {
         print!("  Reading... ");
         select! {
-            _ = sig.recv() => break,
+            _ = sig.recv() => {
+                state.reqs.push_front(Req::EmergencyStop);
+                state.reqs.push_front(Req::EmergencyStop);
+                state.reqs.push_front(Req::EmergencyStop);
+            }
+
             r = port.read(&mut raw[pos..]) => {
                 match r {
                     Ok(0) if pos == 0 => break,
                     Ok(0) => {
-                        handle(&port, &mut state, &raw[..pos]).await?;
+                        let _ = handle(&port, &mut state, &raw[..pos]).await?;
                         break;
                     }
                     Ok(n) => {
@@ -57,7 +65,9 @@ async fn main() -> Result<(), anyhow::Error> {
 
                         let mut start = 0;
                         while let Some(i) = raw[start..pos].iter().position(|&c| c == b'\n') {
-                            handle(&port, &mut state, &raw[start..(start + i)]).await?;
+                            if handle(&port, &mut state, &raw[start..(start + i)]).await? {
+                                return Ok(())
+                            }
                             start += i + 1;
                         }
                         assert!(start <= pos);
@@ -81,27 +91,35 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+const PEN_UP: Req = Req::Pen(90, 250);
+#[expect(dead_code)]
+const PEN_DOWN: Req = Req::Pen(25, 150);
+#[derive(Clone, Debug)]
 enum Req {
     Heartbeat,
-    IHandleDialogs,
-    PenUp(u8 /* 0..180 */, u16),
-    PenDown(u8 /* 0..180 */, u16),
+    PromptsSupported,
+    PromptAnswerContinue,
+    Pen(u8 /* 0..180 */, u16),
     MotorsEngage,
     MotorsDisengage,
     FindHome,
+    Raw(String),   // passthrough
+    EmergencyStop, // https://marlinfw.org/docs/gcode/M112.html
+    Die,           // not an actual Marlin command
 }
 impl Display for Req {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Heartbeat => write!(f, "M400"),
-            Self::IHandleDialogs => write!(f, "M876 P1"),
-            Self::PenUp(angle, ms) | Self::PenDown(angle, ms) => {
-                write!(f, "M280 P0 S{angle} T{ms}")
-            }
+            Self::PromptsSupported => write!(f, "M876 P1"),
+            Self::PromptAnswerContinue => write!(f, "M876 S0"),
+            Self::Pen(angle, ms) => write!(f, "M280 P0 S{angle} T{ms}"),
             Self::MotorsEngage => write!(f, "M17"),
             Self::MotorsDisengage => write!(f, "M18"),
             Self::FindHome => write!(f, "G28 X Y"),
+            Self::Raw(line) => write!(f, "{line}"),
+            Self::EmergencyStop => write!(f, "M112"),
+            Self::Die => unreachable!(),
         }
     }
 }
@@ -111,12 +129,16 @@ struct State {
     ready: Option<bool>,
     reqs: VecDeque<Req>,
     last_line_number_sent: u32,
+    started_drawing: bool,
 }
 impl State {
-    async fn send(&mut self, port: &SerialPort) -> io::Result<Option<Req>> {
+    async fn send(&mut self, port: &SerialPort) -> Result<Option<Req>> {
         if self.ready.is_some_and(|ready| ready)
             && let Some(req) = self.reqs.pop_front()
         {
+            if matches!(req, Req::Die) {
+                return Ok(Some(req));
+            }
             self.ready = Some(false);
             self.last_line_number_sent += 1;
             println!(">> #{} {req:?}: {req}", self.last_line_number_sent);
@@ -127,22 +149,32 @@ impl State {
     }
 }
 
-async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> anyhow::Result<()> {
-    let Ok(line) = str::from_utf8(line) else {
-        println!("> GARBAGE! Check baud rate? {line:?}");
-        return Ok(());
-    };
+async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<bool> {
+    let Ok(line) = str::from_utf8(line) else { bail!("> GARBAGE! Check baud rate? {line:?}") };
     println!("> {line:?}");
 
     match line {
         "//action:notification Polargraph Ready." => {
             println!("Ready!");
-            assert!(state.ready.is_none(), "State is already initialized: {state:?}");
             state.ready = Some(true);
         }
         "ok" => {
             println!("   #{} ack'd", state.last_line_number_sent);
             state.ready = Some(true);
+        }
+        "//action:prompt_show" => {
+            // Since we support prompts, we're expected to reply something here:
+            // >> #11 Raw("M0 Ready black and click"): M0 Ready black and click
+            // > "//action:notification Ready black and click\r"
+            // > "//action:prompt_end"
+            // > "//action:prompt_begin Ready black and click"
+            // > "//action:prompt_button Continue"
+            // > "//action:prompt_show"
+            // > "echo:busy: paused for user"
+            //... let's try Continue and just hope!
+            println!("HACK");
+            state.ready = Some(true);
+            state.reqs.push_front(Req::PromptAnswerContinue);
         }
         _ if line.starts_with("Error:") => {
             if line.contains("Printer halted") {
@@ -154,13 +186,31 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> anyhow::Re
         _ => {}
     }
 
-    if let Some(req) = state.send(port).await? {
-        const PEN_UP: Req = Req::PenUp(90, 250);
-        const PEN_DOWN: Req = Req::PenDown(25, 150);
-        if req == Req::IHandleDialogs {
-            state.reqs.extend([PEN_UP, Req::MotorsDisengage, Req::FindHome].into_iter());
+    if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() && !state.started_drawing {
+        print!("  Loading... ");
+        let mut count = 0;
+        let mut lines = io::stdin().lines();
+        while let Some(Ok(line)) = lines.next() {
+            if line.is_empty() || line.trim().starts_with(';') {
+                continue;
+            }
+            if line == format!("{}", Req::FindHome) && count == 0 {
+                // At this point we're already home
+                continue;
+            }
+            count += 1;
+            state.reqs.push_back(Req::Raw(line));
+        }
+        println!("{count} GCODE lines!");
+        state.started_drawing = true;
+        state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die].into_iter());
+        if count != 0 {
+            println!("  Drawing!");
         }
     }
 
-    Ok(())
+    if let Some(req) = state.send(port).await? {
+        return Ok(matches!(req, Req::Die));
+    }
+    Ok(false)
 }
