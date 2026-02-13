@@ -6,6 +6,9 @@ use tokio::{
     select,
     signal::unix::{SignalKind, signal},
 };
+use tracing::{debug, error, info, trace, warn};
+use tracing_indicatif::IndicatifLayer;
+use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 // On Windows, use something like "COM1" or "COM15".
 //
@@ -81,7 +84,7 @@ impl State {
             }
             self.ready = Some(false);
             self.last_line_number_sent += 1;
-            println!(">> #{} {req:?}: {req}", self.last_line_number_sent);
+            debug!(">> #{} {req:?}: {req}", self.last_line_number_sent);
             port.write_all(format!("{req}\n").as_bytes()).await?;
             return Ok(Some(req));
         }
@@ -91,14 +94,21 @@ impl State {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("Available ports: {:?}", SerialPort::available_ports()?);
+    let indicatif_layer = IndicatifLayer::new();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_writer(indicatif_layer.get_stderr_writer()))
+        .with(indicatif_layer)
+        .with(EnvFilter::from_default_env())
+        .init();
+
+    info!("Available ports: {:?}", SerialPort::available_ports()?);
 
     let port_name = env::var(SEPIAL_PORT).unwrap_or("/dev/ttyACM0".to_owned());
     let baud_rate = env::var(SEPIAL_BAUD).map(|x| x.parse().unwrap()).unwrap_or(250000);
 
-    print!("Connecting to {port_name} at {baud_rate}... ");
+    info!("Connecting to {port_name} at {baud_rate}... ");
     let port = SerialPort::open(port_name, baud_rate)?;
-    println!("ok!");
+    info!("ok!");
 
     let mut state = State::new();
 
@@ -106,7 +116,7 @@ async fn main() -> Result<()> {
     let mut raw = [0u8; 512];
     let mut sig = signal(SignalKind::interrupt())?;
     loop {
-        print!("  Reading... ");
+        trace!("  Reading... ");
         select! {
             _ = sig.recv() => {
                 state.reqs.push_front(Req::EmergencyStop);
@@ -122,7 +132,7 @@ async fn main() -> Result<()> {
                         break;
                     }
                     Ok(n) => {
-                        println!("{n} bytes.");
+                        trace!("{n} bytes.");
                         pos += n;
 
                         let mut start = 0;
@@ -140,7 +150,7 @@ async fn main() -> Result<()> {
                         assert_ne!(pos, raw.len(), "Line too long? ({pos}) {raw:?}");
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::TimedOut => {
-                        print!("{}", if pos == 0 { "." } else { "!" });
+                        trace!("{}", if pos == 0 { "." } else { "!" });
                         continue;
                     }
                     Err(e) => return Err(e.into()),
@@ -149,21 +159,21 @@ async fn main() -> Result<()> {
         }
     }
 
-    println!("Exited.");
+    info!("Exited.");
     Ok(())
 }
 
 async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<bool> {
     let Ok(line) = str::from_utf8(line) else { bail!("> GARBAGE! Check baud rate? {line:?}") };
-    println!("> {line:?}");
+    debug!("> {line:?}");
 
     match line {
         "//action:notification Polargraph Ready." => {
-            println!("Ready!");
+            info!("Ready!");
             state.ready = Some(true);
         }
         "ok" => {
-            println!("   #{} ack'd", state.last_line_number_sent);
+            trace!("   #{} ack'd", state.last_line_number_sent);
             state.ready = Some(true);
         }
         "//action:prompt_show" => {
@@ -176,7 +186,7 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
             // > "//action:prompt_show"
             // > "echo:busy: paused for user"
             //... let's try Continue and just hope!
-            println!("HACK");
+            warn!("HACK");
             state.ready = Some(true);
             state.reqs.push_front(Req::PromptAnswerContinue);
         }
@@ -184,14 +194,14 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
             if line.contains("Printer halted") {
                 bail!("Fatal: {line}")
             }
-            println!("Stopping! Should we be continuing?");
+            error!("Stopping! Should we be continuing?");
             state.ready = Some(false);
         }
         _ => {}
     }
 
     if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() {
-        print!("  Loading... ");
+        info!("  Loading... ");
         let mut count = 0;
         let mut lines = io::stdin().lines();
         while let Some(Ok(line)) = lines.next() {
@@ -205,10 +215,10 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
             count += 1;
             state.reqs.push_back(Req::Raw(line));
         }
-        println!("{count} GCODE lines!");
+        info!("{count} GCODE lines!");
         state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die].into_iter());
         if count != 0 {
-            println!("  Drawing!");
+            info!("  Drawing!");
         }
     }
 
