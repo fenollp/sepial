@@ -7,17 +7,92 @@ use tokio::{
     signal::unix::{SignalKind, signal},
 };
 
+// On Windows, use something like "COM1" or "COM15".
+//
+// python3 -m serial.tools.miniterm -e /dev/ttyACM0 250000
+//
 const SEPIAL_PORT: &str = "SEPIAL_PORT";
 const SEPIAL_BAUD: &str = "SEPIAL_BAUD";
+
+// start
+// Marlin bugfix-2.1.x
+// echo: Last Updated: 2023-01-27 | Author: (Marginally Clever, Makelangelo 5 Huge)
+// echo: Compiled: Nov  3 2023
+// echo: Free Memory: 4012  PlannerBufferBytes: 1152
+// //action:notification Polargraph Ready.
+// //action:prompt_end
+// echo:SD card ok
+
+const PEN_UP: Req = Req::Pen(90, 250);
+#[expect(dead_code)]
+const PEN_DOWN: Req = Req::Pen(25, 150);
+
+#[derive(Clone, Debug)]
+enum Req {
+    Heartbeat,
+    PromptsSupported,
+    PromptAnswerContinue,
+    Pen(u8 /* 0..180 */, u16),
+    MotorsEngage,
+    MotorsDisengage,
+    FindHome,
+    Raw(String),   // passthrough
+    EmergencyStop, // https://marlinfw.org/docs/gcode/M112.html
+    Die,           // not an actual Marlin command
+}
+impl Display for Req {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Heartbeat => write!(f, "M400"),
+            Self::PromptsSupported => write!(f, "M876 P1"),
+            Self::PromptAnswerContinue => write!(f, "M876 S0"),
+            Self::Pen(angle, ms) => write!(f, "M280 P0 S{angle} T{ms}"),
+            Self::MotorsEngage => write!(f, "M17"),
+            Self::MotorsDisengage => write!(f, "M18"),
+            Self::FindHome => write!(f, "G28 X Y"),
+            Self::Raw(line) => write!(f, "{line}"),
+            Self::EmergencyStop => write!(f, "M112"),
+            Self::Die => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct State {
+    ready: Option<bool>,
+    reqs: VecDeque<Req>,
+    last_line_number_sent: u32,
+}
+impl State {
+    fn new() -> Self {
+        Self {
+            reqs: [Req::Heartbeat, Req::PromptsSupported, PEN_UP, Req::MotorsEngage, Req::FindHome]
+                .into(),
+            ..Self::default()
+        }
+    }
+
+    async fn send(&mut self, port: &SerialPort) -> Result<Option<Req>> {
+        if self.ready.is_some_and(|ready| ready)
+            && let Some(req) = self.reqs.pop_front()
+        {
+            if matches!(req, Req::Die) {
+                return Ok(Some(req));
+            }
+            self.ready = Some(false);
+            self.last_line_number_sent += 1;
+            println!(">> #{} {req:?}: {req}", self.last_line_number_sent);
+            port.write_all(format!("{req}\n").as_bytes()).await?;
+            return Ok(Some(req));
+        }
+        Ok(None)
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("Available ports: {:?}", SerialPort::available_ports()?);
 
-    // On Windows, use something like "COM1" or "COM15".
-    //
-    // python3 -m serial.tools.miniterm -e /dev/ttyACM0 250000
-    //
     let port_name = env::var(SEPIAL_PORT).unwrap_or("/dev/ttyACM0".to_owned());
     let baud_rate = env::var(SEPIAL_BAUD).map(|x| x.parse().unwrap()).unwrap_or(250000);
 
@@ -25,20 +100,7 @@ async fn main() -> Result<()> {
     let port = SerialPort::open(port_name, baud_rate)?;
     println!("ok!");
 
-    // start
-    // Marlin bugfix-2.1.x
-    // echo: Last Updated: 2023-01-27 | Author: (Marginally Clever, Makelangelo 5 Huge)
-    // echo: Compiled: Nov  3 2023
-    // echo: Free Memory: 4012  PlannerBufferBytes: 1152
-    // //action:notification Polargraph Ready.
-    // //action:prompt_end
-    // echo:SD card ok
-
-    let mut state = State {
-        reqs: [Req::Heartbeat, Req::PromptsSupported, PEN_UP, Req::MotorsEngage, Req::FindHome]
-            .into(),
-        ..State::default()
-    };
+    let mut state = State::new();
 
     let mut pos = 0;
     let mut raw = [0u8; 512];
@@ -89,63 +151,6 @@ async fn main() -> Result<()> {
 
     println!("Exited.");
     Ok(())
-}
-
-const PEN_UP: Req = Req::Pen(90, 250);
-#[expect(dead_code)]
-const PEN_DOWN: Req = Req::Pen(25, 150);
-#[derive(Clone, Debug)]
-enum Req {
-    Heartbeat,
-    PromptsSupported,
-    PromptAnswerContinue,
-    Pen(u8 /* 0..180 */, u16),
-    MotorsEngage,
-    MotorsDisengage,
-    FindHome,
-    Raw(String),   // passthrough
-    EmergencyStop, // https://marlinfw.org/docs/gcode/M112.html
-    Die,           // not an actual Marlin command
-}
-impl Display for Req {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Heartbeat => write!(f, "M400"),
-            Self::PromptsSupported => write!(f, "M876 P1"),
-            Self::PromptAnswerContinue => write!(f, "M876 S0"),
-            Self::Pen(angle, ms) => write!(f, "M280 P0 S{angle} T{ms}"),
-            Self::MotorsEngage => write!(f, "M17"),
-            Self::MotorsDisengage => write!(f, "M18"),
-            Self::FindHome => write!(f, "G28 X Y"),
-            Self::Raw(line) => write!(f, "{line}"),
-            Self::EmergencyStop => write!(f, "M112"),
-            Self::Die => unreachable!(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct State {
-    ready: Option<bool>,
-    reqs: VecDeque<Req>,
-    last_line_number_sent: u32,
-}
-impl State {
-    async fn send(&mut self, port: &SerialPort) -> Result<Option<Req>> {
-        if self.ready.is_some_and(|ready| ready)
-            && let Some(req) = self.reqs.pop_front()
-        {
-            if matches!(req, Req::Die) {
-                return Ok(Some(req));
-            }
-            self.ready = Some(false);
-            self.last_line_number_sent += 1;
-            println!(">> #{} {req:?}: {req}", self.last_line_number_sent);
-            port.write_all(format!("{req}\n").as_bytes()).await?;
-            return Ok(Some(req));
-        }
-        Ok(None)
-    }
 }
 
 async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<bool> {
