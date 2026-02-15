@@ -1,8 +1,16 @@
-use std::{collections::VecDeque, env, fmt, fmt::Display, io};
+use std::{
+    collections::VecDeque,
+    env,
+    fmt::{self, Display},
+    io,
+    path::PathBuf,
+};
 
 use anyhow::{Result, anyhow, bail};
 use serial2_tokio::SerialPort;
 use tokio::{
+    fs::File,
+    io::{AsyncBufReadExt, BufReader},
     select,
     signal::unix::{SignalKind, signal},
 };
@@ -14,8 +22,9 @@ use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::Subscrib
 //
 // python3 -m serial.tools.miniterm -e /dev/ttyACM0 250000
 //
-const SEPIAL_PORT: &str = "SEPIAL_PORT";
 const SEPIAL_BAUD: &str = "SEPIAL_BAUD";
+const SEPIAL_GCODE: &str = "SEPIAL_GCODE";
+const SEPIAL_PORT: &str = "SEPIAL_PORT";
 
 // start
 // Marlin bugfix-2.1.x
@@ -65,10 +74,16 @@ struct State {
     ready: Option<bool>,
     reqs: VecDeque<Req>,
     last_line_number_sent: u32,
+    gcode: Option<PathBuf>,
 }
 impl State {
-    fn new() -> Self {
+    fn new(gcode: impl Into<Option<PathBuf>>) -> Self {
+        let gcode = gcode.into();
+        if gcode.is_none() {
+            warn!("{SEPIAL_GCODE} is unset: won't plot anything!");
+        }
         Self {
+            gcode,
             reqs: [Req::Heartbeat, Req::PromptsSupported, PEN_UP, Req::MotorsEngage, Req::FindHome]
                 .into(),
             ..Self::default()
@@ -115,7 +130,7 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow!("Could not talk Serial with {port_name} @ {baud_rate}: {e}"))?;
     info!("ok!");
 
-    let mut state = State::new();
+    let mut state = State::new(env::var(SEPIAL_GCODE).ok().and_then(|x| x.parse().ok()));
 
     let mut pos = 0;
     let mut raw = [0u8; 512];
@@ -208,17 +223,19 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
     if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() {
         info!("  Loading... ");
         let mut count = 0;
-        let mut lines = io::stdin().lines();
-        while let Some(Ok(line)) = lines.next() {
-            if line.is_empty() || line.trim().starts_with(';') {
-                continue;
+        if let Some(ref gcode) = state.gcode {
+            let mut lines = BufReader::new(File::open(gcode).await?).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.is_empty() || line.trim().starts_with(';') {
+                    continue;
+                }
+                if line == format!("{}", Req::FindHome) && count == 0 {
+                    // At this point we're already home
+                    continue;
+                }
+                count += 1;
+                state.reqs.push_back(Req::Raw(line));
             }
-            if line == format!("{}", Req::FindHome) && count == 0 {
-                // At this point we're already home
-                continue;
-            }
-            count += 1;
-            state.reqs.push_back(Req::Raw(line));
         }
         info!("{count} GCODE lines!");
         state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die].into_iter());

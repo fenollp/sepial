@@ -4,7 +4,8 @@ Stream GCODE to my Makelangelo 5 HUGE via WiFi via an ESP32C6 plugged in USB to 
 ```shell
 cargo install --locked --force --git https://github.com/fenollp/sepial.git --branch=main
 
-SEPIAL_PORT=/dev/ttyACM0 SEPIAL_BAUD=250000 RUST_LOG=debug sepial <blobs/circle.gcode
+SEPIAL_GCODE=blobs/circle.gcode SEPIAL_PORT=/dev/ttyACM0 SEPIAL_BAUD=250000 RUST_LOG=debug sepial
+
 2026-02-13T11:18:02.953178Z  INFO sepial: Available ports: ["/dev/ttyS15", "/dev/ttyS6", "/dev/ttyS23", "/dev/ttyS13", "/dev/ttyS31", "/dev/ttyS4", "/dev/ttyS21", "/dev/ttyS11", "/dev/ttyS2", "/dev/ttyS28", "/dev/ttyS0", "/dev/ttyS18", "/dev/ttyS9", "/dev/ttyS26", "/dev/ttyS16", "/dev/ttyACM0", "/dev/ttyS7", "/dev/ttyS24", "/dev/ttyS14", "/dev/ttyS5", "/dev/ttyS22", "/dev/ttyS12", "/dev/ttyS30", "/dev/ttyS3", "/dev/ttyS20", "/dev/ttyS10", "/dev/ttyS29", "/dev/ttyS1", "/dev/ttyS19", "/dev/ttyS27", "/dev/ttyS17", "/dev/ttyS8", "/dev/ttyS25", "/dev/ttyprintk"]
 2026-02-13T11:18:02.953254Z  INFO sepial: Connecting to /dev/ttyACM0 at 250000...
 2026-02-13T11:18:02.953461Z  INFO sepial: ok!
