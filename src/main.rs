@@ -94,6 +94,10 @@ impl State {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    unsafe {
+        env::set_var("RUST_LOG", env::var("RUST_LOG").unwrap_or_else(|_| "debug".to_owned()))
+    };
+
     let indicatif_layer = IndicatifLayer::new();
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_writer(indicatif_layer.get_stderr_writer()))
