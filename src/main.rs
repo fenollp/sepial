@@ -3,7 +3,6 @@ use std::{
     env,
     fmt::{self, Display},
     io,
-    path::PathBuf,
 };
 
 use anyhow::{Result, anyhow, bail};
@@ -74,16 +73,12 @@ struct State {
     ready: Option<bool>,
     reqs: VecDeque<Req>,
     last_line_number_sent: u32,
-    gcode: Option<PathBuf>,
+    gcode: Option<BufReader<File>>,
 }
 impl State {
-    fn new(gcode: impl Into<Option<PathBuf>>) -> Self {
-        let gcode = gcode.into();
-        if gcode.is_none() {
-            warn!("{SEPIAL_GCODE} is unset: won't plot anything!");
-        }
+    fn new(gcode: BufReader<File>) -> Self {
         Self {
-            gcode,
+            gcode: Some(gcode),
             reqs: [Req::Heartbeat, Req::PromptsSupported, PEN_UP, Req::MotorsEngage, Req::FindHome]
                 .into(),
             ..Self::default()
@@ -130,7 +125,11 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow!("Could not talk Serial with {port_name} @ {baud_rate}: {e}"))?;
     info!("ok!");
 
-    let mut state = State::new(env::var(SEPIAL_GCODE).ok().and_then(|x| x.parse().ok()));
+    let Ok(gcode) = env::var(SEPIAL_GCODE) else {
+        bail!("Provide a gcode file with ${SEPIAL_GCODE}=")
+    };
+    let gcode = BufReader::new(File::open(gcode).await?);
+    let mut state = State::new(gcode);
 
     let mut pos = 0;
     let mut raw = [0u8; 512];
@@ -223,8 +222,8 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
     if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() {
         info!("  Loading... ");
         let mut count = 0;
-        if let Some(ref gcode) = state.gcode {
-            let mut lines = BufReader::new(File::open(gcode).await?).lines();
+        if let Some(gcode) = state.gcode.take() {
+            let mut lines = gcode.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.is_empty() || line.trim().starts_with(';') {
                     continue;
