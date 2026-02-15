@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, env, fmt, fmt::Display, io};
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use serial2_tokio::SerialPort;
 use tokio::{
     select,
@@ -111,7 +111,8 @@ async fn main() -> Result<()> {
     let baud_rate = env::var(SEPIAL_BAUD).map(|x| x.parse().unwrap()).unwrap_or(250000);
 
     info!("Connecting to {port_name} at {baud_rate}... ");
-    let port = SerialPort::open(port_name, baud_rate)?;
+    let port = SerialPort::open(&port_name, baud_rate)
+        .map_err(|e| anyhow!("Could not talk Serial with {port_name} @ {baud_rate}: {e}"))?;
     info!("ok!");
 
     let mut state = State::new();
