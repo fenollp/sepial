@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow, bail};
+use dialoguer::Confirm;
 use serial2_tokio::SerialPort;
 use tokio::{
     fs::File,
@@ -13,8 +14,8 @@ use tokio::{
     select,
     signal::unix::{SignalKind, signal},
 };
-use tracing::{debug, error, info, trace, warn};
-use tracing_indicatif::IndicatifLayer;
+use tracing::{debug, error, info, trace};
+use tracing_indicatif::{IndicatifLayer, suspend_tracing_indicatif};
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 // On Windows, use something like "COM1" or "COM15".
@@ -205,7 +206,10 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
             // > "//action:prompt_show"
             // > "echo:busy: paused for user"
             //... let's try Continue and just hope!
-            warn!("HACK");
+            suspend_tracing_indicatif(|| {
+                let _ = Confirm::new().with_prompt("Load a pen then press").interact();
+                // TODO? Exit when returns false
+            });
             state.ready = Some(true);
             state.reqs.push_front(Req::PromptAnswerContinue);
         }
