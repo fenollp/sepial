@@ -241,7 +241,7 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
             }
         }
         info!("{count} GCODE lines!");
-        state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die].into_iter());
+        state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die]);
         if count != 0 {
             info!("  Drawing!");
         }
