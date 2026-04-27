@@ -237,9 +237,9 @@ dependencies = [
 
 [[package]]
 name = "serial2"
-version = "0.2.33"
+version = "0.2.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cc76fa68e25e771492ca1e3c53d447ef0be3093e05cd3b47f4b712ba10c6f3c"
+checksum = "fcdbc46aa3882ec3d48ec2b5abcb4f0d863a13d7599265f3faa6d851f23c12f3"
 dependencies = [
  "cfg-if",
  "libc",
@@ -248,9 +248,9 @@ dependencies = [
 
 [[package]]
 name = "serial2-tokio"
-version = "0.1.19"
+version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2d51f8dc77e6c088e2b424dba447250d5ce113ad464f8824a06636026817243"
+checksum = "ce7e4caf7494eb5f8ce1addd7cd1bf817cb94c11ccb083e5969dce970157f66c"
 dependencies = [
  "libc",
  "serial2",
