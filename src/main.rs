@@ -18,10 +18,6 @@ use tracing::{debug, error, info, trace};
 use tracing_indicatif::{IndicatifLayer, suspend_tracing_indicatif};
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-// On Windows, use something like "COM1" or "COM15".
-//
-// python3 -m serial.tools.miniterm -e /dev/ttyACM0 250000
-//
 const SEPIAL_BAUD: &str = "SEPIAL_BAUD";
 const SEPIAL_GCODE: &str = "SEPIAL_GCODE";
 const SEPIAL_PORT: &str = "SEPIAL_PORT";
