@@ -1,0 +1,90 @@
+on: [push]
+name: cargo
+jobs:
+
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        cache-all-crates: true
+        cache-workspace-crates: true
+    - uses: actions/checkout@v6
+    - uses: taiki-e/install-action@nextest
+    - name: Cache `cargo fetch`
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: cargo-deps-
+    - run: cargo fetch
+    - name: Cache `cargo test`
+      uses: actions/cache@v5
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}-and-${{ hashFiles('src/**') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}-and-
+          ${{ runner.os }}-cargo-test-
+    - run: cargo nextest run --all-targets --all-features --locked --frozen --offline
+    - run: cargo nextest run --all-targets --all-features --locked --frozen --offline --release
+
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: nightly
+        cache-all-crates: true
+        cache-workspace-crates: true
+    - run: rustup component add rustfmt
+    - uses: actions/checkout@v6
+    - run: cargo fmt --check --all
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        cache-all-crates: true
+        cache-workspace-crates: true
+    - run: rustup component add clippy
+    - uses: actions/checkout@v6
+    - name: Cache `cargo fetch`
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: cargo-deps-
+    - run: cargo fetch
+    - name: Cache `cargo clippy`
+      uses: actions/cache@v5
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}-and-${{ hashFiles('src/**') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}-and-
+          ${{ runner.os }}-cargo-clippy-
+    - run: |
+        cargo clippy \
+          --locked --frozen --offline --all-targets --all-features \
+          -- -D warnings --no-deps \
+          -W clippy::cast_lossless \
+          -W clippy::double_must_use \
+          -W clippy::must_use_candidate \
+          -W clippy::must_use_unit \
+          -W clippy::redundant_closure_for_method_calls \
+          -W clippy::return_self_not_must_use \
+          -W clippy::str_to_string \
+          -W clippy::unnecessary_wraps
