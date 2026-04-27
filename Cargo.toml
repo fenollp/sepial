@@ -1,7 +1,10 @@
 [package]
+description = "Stream a Marlin v2 GCODE file through serial to a Makelangelo 5 HUGE"
 edition = "2024"
+license = "MIT"
 name = "sepial"
-version = "0.1.0"
+repository = "https://github.com/fenollp/sepial"
+version = "0.2.0"
 
 [dependencies]
 anyhow = { version = "1", default-features = false }
