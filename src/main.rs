@@ -65,6 +65,15 @@ impl Display for Req {
     }
 }
 
+#[test]
+fn fmt_req() {
+    assert_eq!("G28 X Y", format!("{}", Req::FindHome));
+    assert_eq!(
+        "G1 X69.984 Y1.696 F3000.0",
+        format!("{}", Req::Raw("G1 X69.984 Y1.696 F3000.0".to_owned()))
+    );
+}
+
 #[derive(Debug, Default)]
 struct State {
     ready: Option<bool>,
