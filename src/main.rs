@@ -230,22 +230,23 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
 
     if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() {
         info!("  Loading... ");
-        let mut count = 0;
+        let mut reqs = vec![];
         if let Some(gcode) = state.gcode.take() {
             let mut lines = gcode.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.is_empty() || line.trim().starts_with(';') {
                     continue;
                 }
-                if line == format!("{}", Req::FindHome) && count == 0 {
+                if line == format!("{}", Req::FindHome) && reqs.is_empty() {
                     // At this point we're already home
                     continue;
                 }
-                count += 1;
-                state.reqs.push_back(Req::Raw(line));
+                reqs.push(Req::Raw(line));
             }
         }
+        let count = reqs.len();
         info!("{count} GCODE lines!");
+        state.reqs.extend(reqs);
         state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die]);
         if count != 0 {
             info!("  Drawing!");
