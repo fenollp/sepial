@@ -230,22 +230,40 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
 
     if state.ready.is_some_and(|ready| ready) && state.reqs.is_empty() {
         info!("  Loading... ");
-        let mut count = 0;
+        let mut reqs = vec![];
+        let mut ch = ConvexHull::default();
         if let Some(gcode) = state.gcode.take() {
             let mut lines = gcode.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.is_empty() || line.trim().starts_with(';') {
                     continue;
                 }
-                if line == format!("{}", Req::FindHome) && count == 0 {
+                if line == format!("{}", Req::FindHome) && reqs.is_empty() {
                     // At this point we're already home
                     continue;
                 }
-                count += 1;
-                state.reqs.push_back(Req::Raw(line));
+                ch.step(&line)?;
+                reqs.push(Req::Raw(line));
             }
         }
+        let count = reqs.len();
         info!("{count} GCODE lines!");
+        if !ch.is_empty() {
+            let mut do_it = false;
+            suspend_tracing_indicatif(|| -> Result<_> {
+                do_it = Confirm::new()
+                    .with_prompt("Let's hover the figure's convex hull first?")
+                    .interact()
+                    .map_err(|e| anyhow!("Failed getting convex hull interaction: {e}"))?;
+                Ok(())
+            })?;
+            if do_it {
+                //TODO: make sure pen is UP
+                // state.reqs.extend(quads as G poitns)
+                // then PEN DOWN (or is that auto?)
+            }
+        }
+        state.reqs.extend(reqs);
         state.reqs.extend([PEN_UP, Req::FindHome, Req::MotorsDisengage, Req::Die]);
         if count != 0 {
             info!("  Drawing!");
@@ -256,4 +274,81 @@ async fn handle(port: &SerialPort, state: &mut State, line: &[u8]) -> Result<boo
         return Ok(matches!(req, Req::Die));
     }
     Ok(false)
+}
+
+#[test]
+fn minmaxg1() {
+    assert_eq!(
+        minmax_g1("G90 G00 X10 Y20", (f32::MAX, f32::MIN, f32::MAX, f32::MIN)).unwrap(),
+        (f32::MAX, f32::MIN, f32::MAX, f32::MIN)
+    );
+
+    assert_eq!(
+        minmax_g1("G1 X69.810 Y5.843 F3000.0", (f32::MAX, f32::MIN, f32::MAX, f32::MIN)).unwrap(),
+        (69.81, 69.81, 5.843, 5.843)
+    );
+
+    let srcs = vec!["G1 X69.810 Y5.843 F3000.0", "G1 X-36.990 Y77.224 F3000.0"];
+
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+    for src in &srcs {
+        (min_x, max_x, min_y, max_y) = minmax_g1(src, (min_x, max_x, min_y, max_y)).unwrap();
+    }
+    assert_eq!((min_x, max_x, min_y, max_y), (-36.99, 69.81, 5.843, 77.224));
+
+    let mut hull = ConvexHull::default();
+    for src in srcs.iter().rev() {
+        hull.step(src).unwrap();
+    }
+    assert_eq!(hull.quad(), (-36.99, 69.81, 5.843, 77.224));
+}
+
+#[derive(PartialEq)]
+struct ConvexHull((f32, f32, f32, f32));
+impl Default for ConvexHull {
+    fn default() -> Self {
+        Self((f32::MAX, f32::MIN, f32::MAX, f32::MIN))
+    }
+}
+impl ConvexHull {
+    #[must_use]
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    #[must_use]
+    fn quad(&self) -> (f32, f32, f32, f32) {
+        self.0
+    }
+
+    fn step(&mut self, src: &str) -> Result<()> {
+        let bis = minmax_g1(src, self.0)?;
+        *self = Self(bis);
+        Ok(())
+    }
+}
+
+fn minmax_g1(
+    src: &str,
+    (mut min_x, mut max_x, mut min_y, mut max_y): (f32, f32, f32, f32),
+) -> Result<(f32, f32, f32, f32)> {
+    use gcode::{Argument, Code, GeneralCode, Value, core::Number};
+
+    let program = gcode::parse(src).map_err(|e| anyhow!("Failed parsing GCODE {src}: {e:?}"))?;
+    for block in program.blocks {
+        for code in block.codes {
+            if let Code::General(GeneralCode { number, args, .. }) = code
+                && number == Number::new(1)
+            {
+                for Argument { letter, value, .. } in args {
+                    match (letter, &value) {
+                        ('X', Value::Literal(x)) => (min_x, max_x) = (min_x.min(*x), max_x.max(*x)),
+                        ('Y', Value::Literal(y)) => (min_y, max_y) = (min_y.min(*y), max_y.max(*y)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    Ok((min_x, max_x, min_y, max_y))
 }
