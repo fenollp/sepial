@@ -9,7 +9,7 @@ version = "0.2.0"
 [dependencies]
 anyhow = { version = "1", default-features = false }
 dialoguer = { version = "0,>=0.12", default-features = false }
-serial2-tokio = { version = "0,>=0.1", default-features = false }
+serial2-tokio = { version = "0, >=0.1", default-features = false }
 tokio = { version = "1", default-features = false, features = [ "fs", "io-util", "macros", "rt-multi-thread", "signal" ] }
 tracing = { version = "0,>=0.1", default-features = false, features = [ "attributes", "std" ] }
 tracing-indicatif = { version = "0,>=0.3", default-features = false }
